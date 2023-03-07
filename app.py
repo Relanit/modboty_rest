@@ -34,15 +34,10 @@ def index():
     code = request.args.get("code")
     scope = request.args.get("scope")
 
-    result_code = 1 if code else 2
+    if not code:
+        return redirect("http://localhost:8080/auth?result=2")
 
-    token_data = requests.post(
-        f'https://id.twitch.tv/oauth2/token?client_id={config["Twitch"]["client_id"]}&client_secret={config["Twitch"]["client_secret"]}&code={code}&grant_type=authorization_code&redirect_uri=http://localhost:5000/api/v1/auth'
-    ).json()
-
-    if "access_token" not in token_data:
-        result_code = 3
-    elif set(scope.split()) != {
+    if set(scope.split()) != {
         "channel:manage:broadcast",
         "channel:manage:polls",
         "channel:manage:predictions",
@@ -53,47 +48,49 @@ def index():
         "channel:read:vips",
         "moderation:read",
     }:
-        result_code = 4
+        return redirect("http://localhost:8080/auth?result=4")
 
-    if result_code == 1:
-        user_data = requests.get(
-            "https://api.twitch.tv/helix/users",
-            headers={
-                "Authorization": f'Bearer {token_data["access_token"]}',
-                "Client-Id": config["Twitch"]["client_id"],
-            },
-        ).json()
+    token_data = requests.post(
+        f'https://id.twitch.tv/oauth2/token?client_id={config["Twitch"]["client_id"]}&client_secret={config["Twitch"]["client_secret"]}&code={code}&grant_type=authorization_code&redirect_uri=http://localhost:5000/api/v1/auth'
+    ).json()
 
-        to_send = {
-            "login": user_data["data"][0]["login"],
-            "access_token": fernet.encrypt(
-                token_data["access_token"].encode()
-            ).decode(),
-            "refresh_token": fernet.encrypt(
-                token_data["refresh_token"].encode()
-            ).decode(),
-            "expire_time": time.time() + token_data["expires_in"],
-        }
-        data = db.config.find_one({"_id": 1})
+    if "access_token" not in token_data:
+        return redirect("http://localhost:8080/auth?result=3")
 
-        if user_data["data"][0]["login"] not in [
-            channel["login"] for channel in data["channels"]
-        ]:
-            result_code = 5
+    user_data = requests.get(
+        "https://api.twitch.tv/helix/users",
+        headers={
+            "Authorization": f'Bearer {token_data["access_token"]}',
+            "Client-Id": config["Twitch"]["client_id"],
+        },
+    ).json()
 
-        if result_code == 1 and [
-            user
-            for user in data.get("user_tokens", [{}])
-            if user.get("login", "") == user_data["data"][0]["login"]
-        ]:
-            db.config.update_one(
-                {"_id": 1, "user_tokens.login": user_data["data"][0]["login"]},
-                {"$set": {"user_tokens.$": to_send}},
-            )
-        elif result_code == 1:
-            db.config.update_one({"_id": 1}, {"$addToSet": {"user_tokens": to_send}})
+    to_send = {
+        "login": user_data["data"][0]["login"],
+        "access_token": fernet.encrypt(token_data["access_token"].encode()).decode(),
+        "refresh_token": fernet.encrypt(token_data["refresh_token"].encode()).decode(),
+        "expire_time": time.time() + token_data["expires_in"],
+    }
+    data = db.config.find_one({"_id": 1})
 
-    return redirect(f"http://localhost:8080/#/auth?result={result_code}")
+    if user_data["data"][0]["login"] not in [
+        channel["login"] for channel in data["channels"]
+    ]:
+        return redirect("http://localhost:8080/auth?result=5")
+
+    if [
+        user
+        for user in data.get("user_tokens", [{}])
+        if user.get("login", "") == user_data["data"][0]["login"]
+    ]:
+        db.config.update_one(
+            {"_id": 1, "user_tokens.login": user_data["data"][0]["login"]},
+            {"$set": {"user_tokens.$": to_send}},
+        )
+    else:
+        db.config.update_one({"_id": 1}, {"$addToSet": {"user_tokens": to_send}})
+
+    return redirect("http://localhost:8080/#/auth?result=1")
 
 
 if __name__ == "__main__":
