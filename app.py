@@ -90,7 +90,7 @@ def index():
     else:
         db.config.update_one({"_id": 1}, {"$addToSet": {"user_tokens": to_send}})
 
-    return redirect("http://localhost:8080/#/auth?result=1")
+    return redirect("http://localhost:8080/auth?result=1")
 
 
 if __name__ == "__main__":
